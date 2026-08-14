@@ -12,7 +12,6 @@ see ADR-001. Do not add data_interval-based partitioning logic to this DAG.
 """
 
 import pendulum
-
 from airflow.sdk import DAG, task
 
 with DAG(
