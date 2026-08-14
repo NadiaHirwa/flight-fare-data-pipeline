@@ -20,7 +20,7 @@ until that's done. The repo structure, Docker environment, and DAG skeleton
 ## Setup
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/NadiaHirwa/flight-fare-data-pipeline.git
 cd flight-fare-data-pipeline
 cp .env.example .env
 # Fill in .env: generate a real Fernet key and secret key (commands are
