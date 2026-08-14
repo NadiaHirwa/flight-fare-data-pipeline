@@ -1,0 +1,25 @@
+# Secrets — never commit
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Airflow runtime state (local dev)
+logs/
+airflow.db
+airflow-webserver.pid
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+
+# Data — the source CSV is documented, not committed (size/licensing)
+include/data/*.csv
+!include/data/.gitkeep
