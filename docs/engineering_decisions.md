@@ -38,9 +38,10 @@ condensed reference version for the final report.
 ## ADR-005 — Data-quality gate threshold
 
 **Context:** Some invalid rows are expected; the pipeline needs a policy, not ad hoc handling.
-**Decision:** Rejection rate `< 5%` → continue with a warning. `>= 5%` → fail the quality gate.
-**Reason:** A real threshold, not a silent `try/except`, distinguishes "some noisy data" from "something is structurally wrong with this batch."
-**Consequences:** **Provisional** — must be revisited against Phase 0's actual observed rejection rate before being treated as final.
+**Phase 0 finding:** the only real violation found in the actual dataset is the `Total Fare` reconciliation check, failing on 4.42% of all 57,000 rows — consistently in the 2-5% range across every `Seasonality` and `Class` value, consistent with deliberately injected noise rather than a systemic bug. No nulls, no negative fares, no duplicates were found anywhere.
+**Decision:** Rejection rate `< 6%` → continue with a warning. `>= 6%` → fail the quality gate.
+**Reason:** The original 5% figure was a placeholder set before seeing real data. Once profiling showed the dataset's own known, expected noise sits at 4.42%, a 5% gate would have been passing by a margin of well under one percentage point — too fragile to trust as a real safety check. 6% is set deliberately above the known noise floor, so the gate continues to do its actual job (catching a genuinely abnormal batch) without being tripped by data we've already confirmed is fine.
+**Consequences:** This is now the final threshold for this dataset, not provisional. It should still be revisited if the pipeline is ever pointed at a different or updated source file with a different noise profile.
 
 ## ADR-006 — dbt rejected for the KPI layer
 
@@ -73,6 +74,15 @@ condensed reference version for the final report.
 ## ADR-010 — City/route validation against an independent reference domain
 
 **Context:** The assignment explicitly requires flagging invalid city names. Deriving "valid" values from the same file being validated is circular and can't actually detect bad data.
-**Decision:** Validate `Source`/`Destination` against a small, independently-sourced reference list of Bangladesh airports/cities — not against the distinct values found in the CSV itself.
-**Reason:** Satisfies the assignment's explicit requirement while avoiding a validation check that can never actually fail (since it would only ever compare the file against itself).
-**Consequences:** Requires sourcing and citing an authoritative reference list during implementation (see Implementation Reminders, `docs/MASTER_PLAN.md`) — not to be silently invented.
+**Phase 0 finding:** `Source` uses exactly 8 distinct Bangladesh domestic airport codes; `Destination` uses those same 8 plus 12 international hub codes (20 total). All 20 are real, verifiable IATA codes.
+**Decision:** Validate `Source`/`Destination` against these 20 IATA codes, confirmed against the official IATA airport code registry as the cited authoritative source — not against the distinct values found in the CSV itself, even though the observed values happen to be exactly this set.
+**Reason:** Satisfies the assignment's explicit requirement while avoiding a validation check that can never actually fail (since it would only ever compare the file against itself). Citing IATA as the source (rather than "the values we happened to see") means a genuinely invalid code in a future file would still be caught.
+**Consequences:** None further — the reference list is small, finite, and now finalized in `docs/data_contract.md`.
+
+## ADR-011 — Fact table and KPI renamed to match the confirmed grain
+
+**Context:** The assignment's wording used "Booking Count by Airline," and the plan initially used `fact_flight_prices` as a provisional table name pending grain confirmation.
+**Phase 0 finding:** the dataset contains no booking, customer, or reservation information anywhere — no such entity exists in the data. Each row is a flight fare quote/offer (a specific airline, route, and departure time, at a specific class), confirmed by finding zero duplicate rows on that composite key across all 57,000 rows.
+**Decision:** The fact table is named `flight_fare_quotes`, not `fact_flight_prices`. The KPI "Booking Count by Airline" is renamed "Flight Offer Count by Airline."
+**Reason:** Calling data "bookings" when no booking entity exists in the source would misrepresent what the pipeline actually measures — a table or KPI name should communicate what one row actually means, not just match the assignment's original wording when that wording turns out not to fit the real data.
+**Consequences:** Any reference to `fact_flight_prices` or "Booking Count" in earlier drafts of this project (DAG task names, docs) is superseded by this ADR.

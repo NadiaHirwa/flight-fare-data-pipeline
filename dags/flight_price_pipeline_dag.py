@@ -3,12 +3,14 @@ Flight price analysis pipeline — Airflow DAG.
 
 This file orchestrates only: task definitions and dependencies. All business
 logic lives in src/ and is imported here, per ADR-007 (see
-docs/engineering_decisions.md). Task bodies below are placeholders until
-Phase 0 dataset profiling (docs/data_profile.md) is complete — see
-MASTER_PLAN.md for why nothing downstream is finalized before that.
+docs/engineering_decisions.md). Phase 0 profiling is complete
+(docs/data_profile.md) and the data contract is finalized
+(docs/data_contract.md); task bodies below still raise NotImplementedError
+pending the actual implementation of that logic.
 
 Static, one-time dataset: schedule is None (manually triggered), not @daily —
-see ADR-001. Do not add data_interval-based partitioning logic to this DAG.
+see ADR-001, confirmed final after Phase 0 (57K rows, no reason to
+reconsider). Do not add data_interval-based partitioning logic to this DAG.
 """
 
 import pendulum
@@ -59,8 +61,9 @@ with DAG(
     @task()
     def transform_and_load_fact(pipeline_run_id: str) -> str:
         """Compute Total Fare, normalize types, load valid rows into
-        analytics.fact_flight_prices (name provisional — see ADR)."""
-        raise NotImplementedError("Pending docs/data_contract.md and grain confirmation.")
+        analytics.flight_fare_quotes (finalized name — see ADR-011,
+        Phase 0 confirmed grain is a fare quote, not a booking)."""
+        raise NotImplementedError("Pending docs/data_contract.md implementation — contract is finalized.")
 
     @task()
     def compute_kpi_avg_fare_by_airline(fact_table: str) -> None:
@@ -69,12 +72,15 @@ with DAG(
     @task()
     def compute_kpi_seasonal_fare_variation(fact_table: str) -> None:
         raise NotImplementedError(
-            "Pending Phase 0 date-column finding — see docs/kpi_definitions.md."
+            "Pending include/sql/analytics/kpi_seasonal_fare_variation.sql — "
+            "resolved via GROUP BY on the existing Seasonality column, see docs/kpi_definitions.md."
         )
 
     @task()
-    def compute_kpi_booking_count_by_airline(fact_table: str) -> None:
-        raise NotImplementedError("Pending include/sql/analytics/kpi_booking_count_by_airline.sql")
+    def compute_kpi_flight_offer_count_by_airline(fact_table: str) -> None:
+        """Renamed from compute_kpi_booking_count_by_airline — ADR-011.
+        No booking entity exists in the source data."""
+        raise NotImplementedError("Pending include/sql/analytics/kpi_flight_offer_count_by_airline.sql")
 
     @task()
     def compute_kpi_top_routes(fact_table: str) -> None:
@@ -102,7 +108,7 @@ with DAG(
     kpi_tasks = [
         compute_kpi_avg_fare_by_airline(fact_table),
         compute_kpi_seasonal_fare_variation(fact_table),
-        compute_kpi_booking_count_by_airline(fact_table),
+        compute_kpi_flight_offer_count_by_airline(fact_table),
         compute_kpi_top_routes(fact_table),
     ]
 

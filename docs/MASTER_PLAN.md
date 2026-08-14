@@ -1,5 +1,40 @@
 # Master Plan — Flight Fare Data Pipeline
 
+## Project Overview
+
+**Assignment (restated in full, so this document stands alone):** build an
+end-to-end Apache Airflow pipeline that ingests the Flight Price Dataset of
+Bangladesh (a CSV), loads it into a MySQL staging table, validates and
+transforms it, computes four KPIs (average fare by airline, seasonal fare
+variation, booking count by airline, most popular routes), and loads the
+results into a PostgreSQL analytics database — with a written report
+covering architecture, DAG/task descriptions, KPI logic, and challenges
+encountered.
+
+**Definition of done** — every item below must be true for the project to
+be considered complete. Anyone picking up this document should be able to
+work through this checklist top to bottom without needing to ask what's
+left:
+
+- [x] Phase 0 dataset profiling complete, findings recorded in `docs/data_profile.md`
+- [x] `docs/data_contract.md` fully filled in (no blank cells)
+- [ ] All DDL written and applied: `include/sql/staging/`, `include/sql/analytics/`
+- [ ] Every task body in `dags/flight_price_pipeline_dag.py` implemented (no `NotImplementedError` remaining)
+- [ ] All four KPIs computed, including a resolved decision on Seasonal Fare Variation either way
+- [ ] KPI-level reconciliation checks (sum-of-counts, min≤avg≤max) passing
+- [ ] Source-to-target reconciliation equations hold on a full pipeline run (`source = valid + rejected`, `valid = loaded`)
+- [ ] Full pipeline runs end-to-end successfully via `make up` + manually triggering the DAG in the UI
+- [x] `docs/kpi_definitions.md` finalized with no "PENDING" markers left
+- [x] `docs/engineering_decisions.md` ADRs updated if Phase 0 changed any provisional decision (ADR-001, ADR-005, ADR-010 are the ones flagged as provisional)
+- [ ] Tests passing locally (`make test`) and in CI
+- [ ] `docs/performance_metrics.md` populated from a real run, not left as a template
+- [ ] `docs/final_report.md` written with real findings, not the outline
+
+Everything below this point is the reasoning and architecture that gets you
+to that checklist — read it once, then use the checklist above as the
+actual execution tracker.
+
+
 **Repository name:** `flight-fare-data-pipeline`
 
 **Guiding principle:** optimize for engineering maturity, not technology count. Every database table, Airflow task, validation rule, test, and document must trace back to an identifiable problem. Where a common "production" pattern is deliberately *not* used, that decision is documented with the same rigor as one that is.
@@ -104,9 +139,9 @@ ingested_at
 
 `source_record_hash` reuses the same deterministic hash computed for idempotency purposes elsewhere in the pipeline — near-zero additional cost, and it makes tracing a specific rejected row back to its exact source position ("CSV row 1,753 was rejected, here's exactly why") a direct lookup instead of a manual search.
 
-**Data quality gate (threshold, justified not arbitrary).**
-- Rejection rate `< 5%` of total rows → pipeline continues, warning logged.
-- Rejection rate `>= 5%` → pipeline fails the quality gate; downstream tasks do not run. This protects against silently loading a mostly-broken batch. The 5% figure is a starting point, adjustable once Phase 0 profiling shows real-world null/error rates in the actual CSV — if profiling shows natural noise around 3%, the threshold gets revisited before being hard-coded.
+**Data quality gate (threshold, justified not arbitrary — finalized after Phase 0).**
+- Rejection rate `< 6%` → pipeline continues, warning logged.
+- Rejection rate `>= 6%` → pipeline fails the quality gate; downstream tasks do not run. Phase 0 profiling found the dataset's only real violation — the `Total Fare` reconciliation check — failing at a natural rate of 4.42%, consistently across every `Seasonality` and `Class` value (consistent with deliberately injected noise, not a systemic bug). The original 5% placeholder would have passed by under one percentage point — too fragile to trust. 6% is set deliberately above this known noise floor so the gate still catches something genuinely abnormal.
 
 ---
 
@@ -125,7 +160,7 @@ MySQL — staging.quarantine         <- rejected rows with reasons
 transform (Total Fare calc, type normalization)
     |
     v
-PostgreSQL — analytics.fact_flight_prices   <- clean, typed, query-ready
+PostgreSQL — analytics.flight_fare_quotes   <- clean, typed, query-ready
     |
     v
 PostgreSQL — analytics.kpi_* tables          <- one table per KPI, computed via SQL
@@ -135,13 +170,13 @@ PostgreSQL — analytics.kpi_* tables          <- one table per KPI, computed vi
 
 **Why PostgreSQL for analytics:** it is the serving layer — clean, strongly typed (`NUMERIC(12,2)` for all money columns, never `FLOAT`), indexed for the query patterns the KPIs need, and completely decoupled from the raw ingestion format.
 
-**Schema decision:** a single `fact_flight_prices` table plus flat KPI tables, not a dimensional star schema. Per Phase 0, this dataset is a single static extract with no update cadence and no evidence yet of needing separately-managed dimension tables. A star schema will only be introduced if profiling reveals a genuine need (e.g., slowly-changing airline metadata) — not by default, and not to "demonstrate DEM04" without a real reason.
+**Schema decision:** a single `flight_fare_quotes` table (finalized name — see ADR-011; Phase 0 confirmed each row is a flight fare quote/offer, not a booking) plus flat KPI tables, not a dimensional star schema. Per Phase 0, this dataset is a single static extract with no update cadence and no evidence of needing separately-managed dimension tables. A star schema was evaluated and rejected — see ADR-004.
 
 ---
 
 ## Idempotency and Reproducibility
 
-**Preferred strategy: full truncate-and-reload**, at both the MySQL staging layer and the PostgreSQL analytics layer, on every DAG run — **provisional pending Phase 0 confirmation of row count, file size, and observed load duration.** This dataset is a static, one-time file — not date-partitioned daily data — so the standard Airflow `data_interval` partitioning pattern does not apply here, and applying it anyway would be a misuse of the pattern rather than a correct implementation of it. If Phase 0 shows a dataset in the tens-of-thousands-of-rows range (the expected case for this Kaggle source), truncate-and-reload stands as final. If profiling unexpectedly reveals a dataset large enough that a full reload has a meaningful performance cost, this decision is reopened before implementation, not after.
+**Strategy: full truncate-and-reload** (final — confirmed by Phase 0 at 57,000 rows / 13.49 MB, comfortably small enough that no reconsideration is warranted), at both the MySQL staging layer and the PostgreSQL analytics layer, on every DAG run. This dataset is a static, one-time file — not date-partitioned daily data — so the standard Airflow `data_interval` partitioning pattern does not apply here, and applying it anyway would be a misuse of the pattern rather than a correct implementation of it.
 
 **Safety net beyond truncate-and-reload:** the analytics fact table carries a deterministic row hash (computed from the row's business-key fields) with a `UNIQUE` constraint. This means that even in a future scenario where truncate-and-reload isn't used (e.g., an updated CSV arrives incrementally), duplicate rows still cannot silently accumulate — the constraint would surface a conflict rather than allow silent duplication.
 
@@ -211,7 +246,7 @@ check_source_file
   -> [fan-out, parallel]
        compute_kpi_avg_fare_by_airline
        compute_kpi_seasonal_fare_variation   (conditional on Phase 0 date-column finding)
-       compute_kpi_booking_count_by_airline
+       compute_kpi_flight_offer_count_by_airline
        compute_kpi_top_routes
   -> [fan-in]
      post_load_quality_check        (row counts, nulls, key uniqueness, referential checks,
@@ -222,7 +257,7 @@ check_source_file
 **KPI-level reconciliation, not just "does the KPI table exist."** Cheap, semantic checks that catch a wrong aggregation logic bug, not just a missing-table bug:
 
 ```
-SUM(booking_count_by_airline) = total valid fact rows   (each row has exactly one airline)
+SUM(flight_offer_count_by_airline) = total valid fact rows   (each row has exactly one airline)
 SUM(top_routes counts)        = total valid fact rows   (each row has exactly one route)
 per airline: MIN(total_fare) <= AVG(total_fare) <= MAX(total_fare)
 ```
@@ -243,30 +278,27 @@ Rejection rate over threshold   -> quality_gate_check fails the pipeline explici
 
 ---
 
-## KPI Definitions (exact, not prose)
-
-Finalized after Phase 0 confirms the actual grain and available columns.
+## KPI Definitions (exact, finalized after Phase 0)
 
 ```
 Average Fare by Airline:
     AVG(total_fare) GROUP BY airline
 
-Booking Count by Airline:
+Flight Offer Count by Airline:  (renamed from "Booking Count by Airline" — ADR-011)
     COUNT(*) GROUP BY airline
-    -- naming depends on Phase 0 grain finding: if rows are fare quotes rather than
-    -- bookings, this KPI is renamed/documented accordingly rather than mislabeled.
+    -- No booking/customer/reservation entity exists in the source data;
+    -- each row is a flight fare quote/offer, confirmed by zero duplicate
+    -- rows on (Airline, Source, Destination, Departure Date & Time).
 
 Top Routes:
     route = source || '-' || destination
     metric = COUNT(*) GROUP BY route, ORDER BY metric DESC
 
-Seasonal Fare Variation:
-    PENDING Phase 0 — requires a date field. Peak season boundaries (e.g., Eid,
-    winter holidays) will be defined as explicit date ranges once a date column
-    is confirmed to exist. If no date field exists, this KPI is either redefined
-    on the best available proxy (documented as a deviation from the assignment's
-    literal wording) or explicitly marked out of scope with justification in the
-    final report.
+Seasonal Fare Variation:  (resolved — no date-range derivation needed)
+    AVG(total_fare) GROUP BY seasonality
+    -- The source data already provides a Seasonality column (Regular,
+    -- Winter Holidays, Hajj, Eid) — no peak/non-peak date boundaries
+    -- needed to be invented.
 ```
 
 ---
@@ -378,19 +410,23 @@ No separate troubleshooting.md or empty placeholder docs — issues encountered 
 ## Engineering Decisions Log (ADR index — full detail lives in `docs/engineering_decisions.md`)
 
 ```
-ADR-001  Static-dataset idempotency: truncate-and-reload preferred, conditional on
-         Phase 0 confirming dataset size/load-duration; not date-partitioning
+ADR-001  Static-dataset idempotency: truncate-and-reload, confirmed final
+         after Phase 0 (57K rows) — not date-partitioning
 ADR-002  MySQL staging vs. PostgreSQL analytics separation
 ADR-003  Three-level validation (file-level schema, then row-level quality/business
          rules) with quarantine, not silent drop
 ADR-004  Fact table + KPI tables, star schema rejected for this scope
-ADR-005  Data-quality gate threshold (5%, provisional pending real profiling)
+ADR-005  Data-quality gate threshold — finalized at 6% after Phase 0 found
+         a real 4.42% natural noise rate (the Total Fare reconciliation check)
 ADR-006  dbt rejected for this lab's KPI layer
 ADR-007  Airflow task boundaries (meaningful units, not per-function granularity)
 ADR-008  Money stored as NUMERIC(12,2), never FLOAT
 ADR-009  Primarily ETL, with an ELT-style KPI layer inside PostgreSQL
-ADR-010  City/route validation against an independently-defined reference domain,
-         not one derived from the file being validated
+ADR-010  City/route validation against the IATA registry, confirmed 20
+         real codes from Phase 0 — not derived from the file being validated
+ADR-011  Fact table renamed flight_fare_quotes and "Booking Count by Airline"
+         renamed "Flight Offer Count by Airline" — Phase 0 confirmed no
+         booking entity exists in the source data
 ```
 
 Each ADR follows: Context / Options considered / Decision / Reason / Consequences.
@@ -399,11 +435,11 @@ Each ADR follows: Context / Options considered / Decision / Reason / Consequence
 
 ## Implementation Reminders (tracked, not architecture changes)
 
-Plan is frozen as of this point. These three items are noted for when implementation actually touches them — they don't change any decision above, they just prevent losing track of a detail between planning and coding:
+All three items originally tracked here have been resolved by Phase 0 profiling:
 
-1. The Bangladesh airport/city reference list (ADR-010) must cite an authoritative source in `docs/data_contract.md` when it's built — never silently invented.
-2. The 5% rejection threshold (ADR-005) is provisional. Revisit it against Phase 0's actual observed data quality before treating it as final.
-3. `fact_flight_prices` is a working name. Rename it once Phase 0 confirms the row grain, if a more precise name (e.g. `flight_fare_quotes`) better reflects what a row actually represents.
+1. ~~The Bangladesh airport/city reference list must cite an authoritative source~~ — **resolved.** 20 confirmed IATA codes, cited against the official IATA registry, documented in full in `docs/data_contract.md`.
+2. ~~The 5% rejection threshold is provisional~~ — **resolved.** Finalized at 6%, based on the real 4.42% natural noise rate found in the data. See ADR-005.
+3. ~~`fact_flight_prices` is a working name~~ — **resolved.** Renamed to `flight_fare_quotes`, since Phase 0 confirmed the grain is a fare quote, not a booking. See ADR-011.
 
 ## Immediate Next Step
 

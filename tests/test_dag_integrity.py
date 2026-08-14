@@ -20,7 +20,7 @@ EXPECTED_TASK_IDS = {
     "transform_and_load_fact",
     "compute_kpi_avg_fare_by_airline",
     "compute_kpi_seasonal_fare_variation",
-    "compute_kpi_booking_count_by_airline",
+    "compute_kpi_flight_offer_count_by_airline",
     "compute_kpi_top_routes",
     "post_load_quality_check",
     "reconciliation_check",
@@ -57,7 +57,7 @@ def test_kpi_tasks_run_in_parallel(dag):
     kpi_ids = {
         "compute_kpi_avg_fare_by_airline",
         "compute_kpi_seasonal_fare_variation",
-        "compute_kpi_booking_count_by_airline",
+        "compute_kpi_flight_offer_count_by_airline",
         "compute_kpi_top_routes",
     }
     for task_id in kpi_ids:
