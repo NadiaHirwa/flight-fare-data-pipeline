@@ -70,5 +70,6 @@ def test_kpi_tasks_run_in_parallel(dag):
 
 
 def test_dag_has_no_schedule_interval_partitioning(dag):
-    """Static one-time dataset — ADR-001 — this DAG must not be @daily."""
-    assert dag.schedule_interval is None or dag.timetable.summary in ("Never", "None")
+    """Static one-time dataset — ADR-001 — this DAG must not be @daily.
+    schedule=None becomes a NullTimetable internally in Airflow 3.x."""
+    assert type(dag.timetable).__name__ == "NullTimetable"
