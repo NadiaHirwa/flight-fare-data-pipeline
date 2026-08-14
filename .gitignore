@@ -23,3 +23,6 @@ airflow-webserver.pid
 # Data — the source CSV is documented, not committed (size/licensing)
 include/data/*.csv
 !include/data/.gitkeep
+
+
+MASTER_PLAN.md
