@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          pip install ruff pytest apache-airflow==3.3.1 --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.12.txt"
+          pip install -r requirements.txt
+
+      - name: Lint
+        run: ruff check dags/ src/ tests/
+
+      - name: DAG import validation
+        run: python dags/flight_price_pipeline_dag.py
+
+      - name: Unit and DAG structure tests
+        run: pytest tests/ -v
