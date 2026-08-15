@@ -11,11 +11,11 @@ README covers only what's needed to run it.
 
 ## Status
 
-**Pre-implementation.** Phase 0 dataset profiling (`docs/data_profile.md`)
-has not yet been run against the real CSV — see MASTER_PLAN.md for why
-schema DDL, validation rules, and KPI SQL are intentionally not finalized
-until that's done. The repo structure, Docker environment, and DAG skeleton
-(with task bodies as explicit placeholders) are in place.
+**Running end to end.** Phase 0 profiling is complete
+(`docs/data_profile.md`), the data contract, validation rules and KPI SQL are
+finalized, and the DAG has been triggered against the real 57,000-row dataset
+with all 12 tasks succeeding. Measured figures from that run are in
+[`docs/performance_metrics.md`](docs/performance_metrics.md).
 
 ## Setup
 
@@ -30,10 +30,31 @@ cp .env.example .env
 # Place the source CSV here before running the pipeline:
 #   include/data/Flight_Price_Dataset_of_Bangladesh.csv
 
-docker compose up -d
+make up        # start every container; creates the Airflow admin user and
+               # both Airflow Connections (mysql_staging, postgres_analytics)
+make db-init   # apply all DDL — run once, after the containers are healthy
+```
+
+Then trigger `flight_price_pipeline` from the Airflow UI, or:
+
+```bash
+docker compose exec airflow-scheduler airflow dags trigger flight_price_pipeline
 ```
 
 Airflow UI: http://localhost:8081 (login with the admin credentials set in `.env`)
+
+There are no other manual steps — no connections to click together in the UI,
+no permissions to grant by hand. `make up` is safe to re-run: the admin user
+and both Connections are recreated idempotently, and the Connections are
+rebuilt from `.env` each time, so changing a password there is picked up on
+the next start rather than silently ignored.
+
+`make db-init` applies each DDL file as the least-privilege role that owns
+that layer — the staging files as `staging_loader`, the analytics files as
+`analytics_writer`. The analytics half specifically must not run as the
+superuser: whoever runs `CREATE TABLE` owns the table, and the `CREATE INDEX`
+in `kpi_top_routes.sql` requires ownership rather than privileges, so
+superuser-created tables fail the KPI task with `must be owner of table`.
 
 ## Project structure
 
@@ -55,9 +76,6 @@ pip install -r requirements.txt
 pytest tests/ -v
 ```
 
-`tests/test_dag_integrity.py` checks DAG structure only and is safe to run
-before Phase 0 is complete — it does not execute any task's business logic.
-
-## Next step
-
-Phase 0 dataset profiling — see `docs/data_profile.md` for the checklist.
+`tests/test_dag_integrity.py` needs Airflow installed. Without it, run the rest
+with `pytest tests/ --ignore=tests/test_dag_integrity.py`, or run the DAG tests
+inside the container with `make test-docker`.
