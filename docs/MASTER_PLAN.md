@@ -28,7 +28,7 @@ left:
 - [x] `docs/engineering_decisions.md` ADRs updated if Phase 0 changed any provisional decision (ADR-001, ADR-005, ADR-010 are the ones flagged as provisional)
 - [x] Tests passing locally (`make test`) and in CI
 - [x] `docs/performance_metrics.md` populated from a real run, not left as a template
-- [ ] `docs/final_report.md` written with real findings, not the outline
+- [x] `docs/final_report.md` written with real findings, not the outline
 
 Everything below this point is the reasoning and architecture that gets you
 to that checklist — read it once, then use the checklist above as the
