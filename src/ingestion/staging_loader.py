@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import Engine, URL
+from sqlalchemy.engine import URL, Engine
 
 from .exceptions import StagingLoadError
 from .schema import EXPECTED_COLUMNS
@@ -392,5 +392,5 @@ def _mark_run_failed(engine: Engine, pipeline_run_id: str) -> None:
                 ),
                 {"run_id": pipeline_run_id},
             )
-    except Exception:  # noqa: BLE001 - never mask the failure being reported
+    except Exception:
         logger.exception("Could not mark run %s as failed.", pipeline_run_id)
