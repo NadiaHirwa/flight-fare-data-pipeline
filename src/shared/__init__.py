@@ -1,5 +1,16 @@
 """Code shared by more than one pipeline stage.
 
+  connections.py    engines for the MySQL staging and PostgreSQL analytics
+                    databases, resolved from Airflow Connections first and
+                    .env second. No credentials in source.
+  normalization.py  whitespace/casing normalization and the deterministic
+                    record hash, so validation and transformation produce
+                    identical digests.
+  tables.py         staging table names and the CSV -> raw_flights column map.
+  pipeline_runs.py  writers for the staging.pipeline_runs audit row, which
+                    every stage updates part of.
+
+
 A module belongs here when two stages need the *identical* implementation and
 neither should have to import the other's internals — src/transformation/
 reaching into src/validation/ for a hash function would couple two stages that
