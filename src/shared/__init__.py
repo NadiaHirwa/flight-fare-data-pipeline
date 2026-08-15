@@ -8,7 +8,9 @@
                     identical digests.
   tables.py         staging table names and the CSV -> raw_flights column map.
   pipeline_runs.py  writers for the staging.pipeline_runs audit row, which
-                    every stage updates part of.
+                    every stage updates part of. Opened by ingestion, closed
+                    as 'success' by reconciliation_check, or as 'failed' by
+                    whichever stage raised.
 
 
 A module belongs here when two stages need the *identical* implementation and

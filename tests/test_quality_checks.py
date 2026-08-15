@@ -374,6 +374,126 @@ def test_both_equations_and_the_cross_check_can_fail_together():
     assert len(failures) == 3
 
 
+# --- closing the audit row ------------------------------------------------
+
+class FakeRunRow:
+    """A pipeline_runs row that records the UPDATEs applied to it.
+
+    Enough of a database to prove the status transition really happens: the
+    run starts at 'running' (where every earlier stage leaves it) and must end
+    at 'success' only once reconciliation has passed.
+    """
+
+    def __init__(self, counts):
+        self.status = "running"
+        self.completed_at = None
+        self.counts = counts
+        self.statements = []
+
+    def apply(self, sql):
+        self.statements.append(" ".join(sql.split()))
+        if "status = 'success'" in sql:
+            self.status = "success"
+            self.completed_at = "set"
+        elif "status = 'failed'" in sql:
+            self.status = "failed"
+            self.completed_at = "set"
+
+
+class RunRowConnection:
+    def __init__(self, row, fact_row_count):
+        self.row = row
+        self.fact_row_count = fact_row_count
+
+    def execute(self, statement, *args, **kwargs):
+        sql = str(statement)
+        self.row.apply(sql)
+        if "COUNT(*)" in sql:
+            return FakeResult(self.fact_row_count)
+        if "SELECT source_row_count" in sql:
+            counts = self.row.counts
+            return _OneRow(
+                (
+                    counts.source_row_count,
+                    counts.staged_row_count,
+                    counts.valid_row_count,
+                    counts.rejected_row_count,
+                    counts.loaded_row_count,
+                )
+            )
+        return FakeResult(None)
+
+
+class _OneRow:
+    def __init__(self, values):
+        self._values = values
+
+    def one_or_none(self):
+        return self._values
+
+
+class RunRowEngine:
+    def __init__(self, row, fact_row_count):
+        self.connection = RunRowConnection(row, fact_row_count)
+
+    def begin(self):
+        engine = self
+
+        class _Transaction:
+            def __enter__(self):
+                return engine.connection
+
+            def __exit__(self, *exc):
+                return False
+
+        return _Transaction()
+
+
+def test_status_transitions_from_running_to_success():
+    """The audit row must not sit at 'running' forever after a clean run."""
+    from src.quality.reconciliation import reconciliation_check
+
+    row = FakeRunRow(healthy_counts())
+    engine = RunRowEngine(row, fact_row_count=54478)
+
+    assert row.status == "running"
+    reconciliation_check("manual__test", staging_engine=engine, analytics_engine=engine)
+    assert row.status == "success"
+    assert row.completed_at == "set"
+
+
+def test_status_stays_running_when_reconciliation_fails():
+    """A failing run must not be recorded as successful."""
+    from src.quality.reconciliation import reconciliation_check
+
+    row = FakeRunRow(healthy_counts(rejected_row_count=2000))
+    engine = RunRowEngine(row, fact_row_count=54478)
+
+    with pytest.raises(ReconciliationError):
+        reconciliation_check(
+            "manual__test", staging_engine=engine, analytics_engine=engine
+        )
+    assert row.status == "running"
+    assert row.completed_at is None
+
+
+def test_success_is_recorded_on_the_staging_engine():
+    """pipeline_runs lives with staging, not with the analytics layer."""
+    from src.quality.reconciliation import reconciliation_check
+
+    row = FakeRunRow(healthy_counts())
+    staging = RunRowEngine(row, fact_row_count=54478)
+    analytics = RunRowEngine(FakeRunRow(healthy_counts()), fact_row_count=54478)
+
+    reconciliation_check(
+        "manual__test", staging_engine=staging, analytics_engine=analytics
+    )
+    assert any("status = 'success'" in s for s in row.statements)
+    assert not any(
+        "status = 'success'" in s for s in analytics.connection.row.statements
+    )
+
+
 def test_reconciliation_error_is_not_a_quality_check_error():
     """Distinct types so a caller can tell which stage's invariant broke."""
     assert not issubclass(ReconciliationError, QualityCheckError)

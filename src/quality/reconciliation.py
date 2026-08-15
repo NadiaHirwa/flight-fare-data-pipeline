@@ -31,6 +31,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from ..shared.connections import get_analytics_engine, get_staging_engine
+from ..shared.pipeline_runs import mark_run_succeeded
 from ..shared.tables import PIPELINE_RUNS_TABLE
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,13 @@ def reconciliation_check(
         counts.rejected_row_count,
         fact_row_count,
     )
+
+    # Last task in the DAG, and the only one that has proved the run holds
+    # together end to end — so this is where the audit row is closed. Every
+    # earlier stage records only failure, leaving status at 'running' until
+    # here.
+    mark_run_succeeded(staging_engine, pipeline_run_id)
+
     return {
         "pipeline_run_id": pipeline_run_id,
         "source_row_count": counts.source_row_count,

@@ -129,6 +129,36 @@ def record_counts(engine: Engine, pipeline_run_id: str, **counts: int) -> None:
         )
 
 
+def mark_run_succeeded(engine: Engine, pipeline_run_id: str) -> None:
+    """Close the audit row as successful.
+
+    Called by the DAG's last task, reconciliation_check, and only after it has
+    proved the run's counts reconcile — no earlier stage has the standing to
+    call a run successful, because none of them can see whether the stages
+    after it will hold up.
+
+    Without this the row stays at 'running' forever on a successful run, so
+    every completed run reads as still in flight and the 'success' value in the
+    status CHECK constraint is never used.
+
+    Not wrapped in a try/except, unlike mark_run_failed: there is no original
+    exception to protect here, and a failure to record success is a real
+    failure of the audit trail that should surface.
+    """
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                f"""
+                UPDATE {PIPELINE_RUNS_TABLE}
+                   SET status = 'success', completed_at = NOW(6)
+                 WHERE pipeline_run_id = :run_id
+                """
+            ),
+            {"run_id": pipeline_run_id},
+        )
+    logger.info("Closed pipeline run %s (status=success).", pipeline_run_id)
+
+
 def mark_run_failed(engine: Engine, pipeline_run_id: str) -> None:
     """Close the audit row as failed, without masking the original exception.
 
