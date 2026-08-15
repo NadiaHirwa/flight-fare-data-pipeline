@@ -17,7 +17,7 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          pip install ruff pytest apache-airflow==3.3.1 --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.12.txt"
+          pip install apache-airflow==3.3.1 --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.12.txt"
           pip install -r requirements.txt
 
       - name: Lint
