@@ -24,13 +24,10 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from ..ingestion.staging_loader import (
-    COLUMN_MAP,
-    PIPELINE_RUNS_TABLE,
-    STAGING_TABLE,
-    get_staging_engine,
-)
+from ..shared.connections import get_staging_engine
 from ..shared.normalization import compute_record_hash
+from ..shared.pipeline_runs import record_counts
+from ..shared.tables import COLUMN_MAP, STAGING_TABLE
 from .rules import Violation, validate_batch
 
 logger = logging.getLogger(__name__)
@@ -133,7 +130,12 @@ def validate_and_quarantine(
     # mode, and 0/0 should not become a ZeroDivisionError inside a summary.
     rejection_rate = round(rejected_rows / staged_rows, 6) if staged_rows else 0.0
 
-    _record_counts(engine, pipeline_run_id, valid_rows, rejected_rows)
+    record_counts(
+        engine,
+        pipeline_run_id,
+        valid_row_count=valid_rows,
+        rejected_row_count=rejected_rows,
+    )
 
     logger.info(
         "Validation for run %s: %d staged, %d valid, %d rejected "
@@ -264,33 +266,6 @@ def _iter_staged_rows(
         for row in rows:
             yield dict(row)
         last_row_number = rows[-1]["source_row_number"]
-
-
-def _record_counts(
-    engine: Engine, pipeline_run_id: str, valid_rows: int, rejected_rows: int
-) -> None:
-    """Record the counts the reconciliation equations are checked against.
-
-    source_row_count = valid_row_count + rejected_row_count is verified later
-    by reconciliation_check (docs/MASTER_PLAN.md); this task supplies the two
-    right-hand terms.
-    """
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                f"""
-                UPDATE {PIPELINE_RUNS_TABLE}
-                   SET valid_row_count = :valid_rows,
-                       rejected_row_count = :rejected_rows
-                 WHERE pipeline_run_id = :run_id
-                """
-            ),
-            {
-                "valid_rows": valid_rows,
-                "rejected_rows": rejected_rows,
-                "run_id": pipeline_run_id,
-            },
-        )
 
 
 # ---------------------------------------------------------------------------
