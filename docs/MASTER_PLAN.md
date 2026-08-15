@@ -18,16 +18,16 @@ left:
 
 - [x] Phase 0 dataset profiling complete, findings recorded in `docs/data_profile.md`
 - [x] `docs/data_contract.md` fully filled in (no blank cells)
-- [ ] All DDL written and applied: `include/sql/staging/`, `include/sql/analytics/`
-- [ ] Every task body in `dags/flight_price_pipeline_dag.py` implemented (no `NotImplementedError` remaining)
-- [ ] All four KPIs computed, including a resolved decision on Seasonal Fare Variation either way
-- [ ] KPI-level reconciliation checks (sum-of-counts, min≤avg≤max) passing
-- [ ] Source-to-target reconciliation equations hold on a full pipeline run (`source = valid + rejected`, `valid = loaded`)
-- [ ] Full pipeline runs end-to-end successfully via `make up` + manually triggering the DAG in the UI
+- [x] All DDL written and applied: `include/sql/staging/`, `include/sql/analytics/`
+- [x] Every task body in `dags/flight_price_pipeline_dag.py` implemented (no `NotImplementedError` remaining)
+- [x] All four KPIs computed, including a resolved decision on Seasonal Fare Variation either way
+- [x] KPI-level reconciliation checks (sum-of-counts, min≤avg≤max) passing
+- [x] Source-to-target reconciliation equations hold on a full pipeline run (`source = valid + rejected`, `valid = loaded`)
+- [x] Full pipeline runs end-to-end successfully via `make up` + manually triggering the DAG in the UI
 - [x] `docs/kpi_definitions.md` finalized with no "PENDING" markers left
 - [x] `docs/engineering_decisions.md` ADRs updated if Phase 0 changed any provisional decision (ADR-001, ADR-005, ADR-010 are the ones flagged as provisional)
-- [ ] Tests passing locally (`make test`) and in CI
-- [ ] `docs/performance_metrics.md` populated from a real run, not left as a template
+- [x] Tests passing locally (`make test`) and in CI
+- [x] `docs/performance_metrics.md` populated from a real run, not left as a template
 - [ ] `docs/final_report.md` written with real findings, not the outline
 
 Everything below this point is the reasoning and architecture that gets you
