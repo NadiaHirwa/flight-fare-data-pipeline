@@ -33,7 +33,7 @@ from src.validation.rules import (
     LEVEL_BUSINESS_RULE,
     LEVEL_DATA_QUALITY,
     DuplicateGrainKeyTracker,
-    check_base_fare_non_negative,
+    check_base_fare_is_positive,
     check_departure_datetime,
     check_destination_airport,
     check_fare_class,
@@ -42,7 +42,7 @@ from src.validation.rules import (
     check_route_is_distinct,
     check_seasonality,
     check_source_airport,
-    check_tax_surcharge_non_negative,
+    check_tax_surcharge_is_positive,
     check_total_fare_reconciles,
     validate_batch,
     validate_record,
@@ -202,23 +202,44 @@ def test_non_finite_fare_is_rejected(bad):
 
 
 def test_negative_base_fare_is_rejected():
-    violations = check_base_fare_non_negative(record_with(base_fare_bdt="-1.00"))
-    assert [v.rule for v in violations] == ["base_fare_negative"]
+    violations = check_base_fare_is_positive(record_with(base_fare_bdt="-1.00"))
+    assert [v.rule for v in violations] == ["base_fare_not_positive"]
     assert violations[0].level == LEVEL_DATA_QUALITY
 
 
 def test_negative_tax_surcharge_is_rejected():
-    violations = check_tax_surcharge_non_negative(
+    violations = check_tax_surcharge_is_positive(
         record_with(tax_surcharge_bdt="-0.01")
     )
-    assert [v.rule for v in violations] == ["tax_surcharge_negative"]
+    assert [v.rule for v in violations] == ["tax_surcharge_not_positive"]
 
 
-def test_zero_fares_pass_the_sign_check():
-    """docs/data_contract.md states 'value >= 0' for both fare columns, so zero
-    is inside the contract. See the note raised with this implementation."""
-    assert check_base_fare_non_negative(record_with(base_fare_bdt="0.00")) == []
-    assert check_tax_surcharge_non_negative(record_with(tax_surcharge_bdt="0")) == []
+@pytest.mark.parametrize("zero", ["0", "0.00", "0.0", "-0.00"])
+def test_zero_fares_are_rejected(zero):
+    """docs/data_contract.md states 'value > 0' for both fare columns, so zero
+    is a violation and not merely an edge of the accepted range.
+
+    The signed-zero spelling matters: Decimal("-0.00") is a distinct object
+    from Decimal("0.00") but compares equal to it, so <= 0 catches both.
+    """
+    base = check_base_fare_is_positive(record_with(base_fare_bdt=zero))
+    assert [v.rule for v in base] == ["base_fare_not_positive"]
+
+    tax = check_tax_surcharge_is_positive(record_with(tax_surcharge_bdt=zero))
+    assert [v.rule for v in tax] == ["tax_surcharge_not_positive"]
+
+
+def test_zero_fare_reason_does_not_call_zero_negative():
+    """The message has to describe what is actually wrong with the value."""
+    violation = check_base_fare_is_positive(record_with(base_fare_bdt="0.00"))[0]
+    assert "negative" not in violation.reason.lower()
+    assert "> 0" in violation.reason
+
+
+def test_smallest_positive_fare_is_accepted():
+    """Boundary: the rule rejects zero, not everything near it."""
+    assert check_base_fare_is_positive(record_with(base_fare_bdt="0.01")) == []
+    assert check_tax_surcharge_is_positive(record_with(tax_surcharge_bdt="0.01")) == []
 
 
 def test_full_precision_fares_are_accepted():

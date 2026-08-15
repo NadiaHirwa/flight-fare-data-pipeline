@@ -8,8 +8,8 @@ the source of truth, the code follows it.
 Level 2 — data quality:
     required_field_missing        the contract's nullable=false columns
     fare_not_numeric              a fare that will not parse as a number
-    base_fare_negative            Base Fare rule "value >= 0"
-    tax_surcharge_negative        Tax & Surcharge rule "value >= 0"
+    base_fare_not_positive        Base Fare rule "value > 0"
+    tax_surcharge_not_positive    Tax & Surcharge rule "value > 0"
     departure_datetime_invalid    "parseable timestamp"
     source_not_in_iata_domain     the 8 domestic codes (ADR-010)
     destination_not_in_iata_domain  all 20 codes (ADR-010)
@@ -155,17 +155,25 @@ def check_fares_are_numeric(record: Mapping[str, str]) -> list[Violation]:
     return violations
 
 
-def check_base_fare_non_negative(record: Mapping[str, str]) -> list[Violation]:
-    """docs/data_contract.md, Base Fare (BDT): "value >= 0"."""
-    return _check_fare_sign(record, "base_fare_bdt", "base_fare_negative")
+def check_base_fare_is_positive(record: Mapping[str, str]) -> list[Violation]:
+    """docs/data_contract.md, Base Fare (BDT): "value > 0".
+
+    Zero is rejected, not only negatives — which is why the rule identifier is
+    base_fare_not_positive rather than base_fare_negative. A fare of nothing is
+    not a fare, and MASTER_PLAN's Level 2 list has always said "negative or
+    zero fares"; the contract now agrees.
+    """
+    return _check_fare_is_positive(record, "base_fare_bdt", "base_fare_not_positive")
 
 
-def check_tax_surcharge_non_negative(record: Mapping[str, str]) -> list[Violation]:
-    """docs/data_contract.md, Tax & Surcharge (BDT): "value >= 0"."""
-    return _check_fare_sign(record, "tax_surcharge_bdt", "tax_surcharge_negative")
+def check_tax_surcharge_is_positive(record: Mapping[str, str]) -> list[Violation]:
+    """docs/data_contract.md, Tax & Surcharge (BDT): "value > 0"."""
+    return _check_fare_is_positive(
+        record, "tax_surcharge_bdt", "tax_surcharge_not_positive"
+    )
 
 
-def _check_fare_sign(
+def _check_fare_is_positive(
     record: Mapping[str, str], field: str, rule: str
 ) -> list[Violation]:
     value = record.get(field)
@@ -174,12 +182,15 @@ def _check_fare_sign(
     amount = _parse_decimal(str(value))
     if amount is None:
         return []  # already reported by check_fares_are_numeric
-    if amount < 0:
+    if amount <= 0:
         return [
             Violation(
                 rule=rule,
                 level=LEVEL_DATA_QUALITY,
-                reason=f"Field '{field}' is negative ({amount}); contract requires >= 0.",
+                reason=(
+                    f"Field '{field}' is {amount}; contract requires a positive "
+                    "value (> 0)."
+                ),
             )
         ]
     return []
@@ -381,8 +392,8 @@ def check_total_fare_reconciles(record: Mapping[str, str]) -> list[Violation]:
 ALL_RULES = (
     check_required_fields,
     check_fares_are_numeric,
-    check_base_fare_non_negative,
-    check_tax_surcharge_non_negative,
+    check_base_fare_is_positive,
+    check_tax_surcharge_is_positive,
     check_departure_datetime,
     check_source_airport,
     check_destination_airport,
