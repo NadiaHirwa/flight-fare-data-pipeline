@@ -115,11 +115,20 @@ services:
           --role Admin \
           --email "${AIRFLOW_ADMIN_EMAIL}" || true
         # Connections the pipeline resolves by conn_id (src/shared/connections.py).
-        # `connections add` exits 1 if the conn_id already exists, so the same
-        # `|| true` guard the user creation uses keeps a restart idempotent —
-        # this service re-runs on every `docker compose up`, not just the first.
+        #
+        # Deleted before being added, rather than `add ... || true` alone.
+        # `connections add` exits 1 on an existing conn_id, so the guard makes a
+        # restart safe — but it also means an edited password in .env would be
+        # swallowed by that guard and the stale Connection would quietly keep
+        # working until it didn't. Deleting first makes .env the single source
+        # of truth on every `docker compose up`.
+        #
+        # `connections delete` also exits 1 when the conn_id is absent, which is
+        # the normal first-boot case, hence its own guard.
+        #
         # Flags verified against the CLI in this exact image (Airflow 3.3.1);
         # conn_id is positional, everything else is --conn-*.
+        airflow connections delete mysql_staging 2>/dev/null || true
         airflow connections add mysql_staging \
           --conn-type mysql \
           --conn-host mysql \
@@ -127,6 +136,7 @@ services:
           --conn-login "${MYSQL_USER}" \
           --conn-password "${MYSQL_PASSWORD}" \
           --conn-schema "${MYSQL_DATABASE}" || true
+        airflow connections delete postgres_analytics 2>/dev/null || true
         airflow connections add postgres_analytics \
           --conn-type postgres \
           --conn-host postgres \
