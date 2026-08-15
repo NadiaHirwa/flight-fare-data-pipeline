@@ -39,6 +39,8 @@ be caught by this check.
 | Tax & Surcharge (BDT) | NUMERIC(12,2) | false | tax/surcharge amount | > 0 (observed min 200.00) | value > 0 | quarantine | 2 |
 | Total Fare (BDT) | NUMERIC(12,2) | false | final fare | — | `abs(total - (base + tax)) <= 1.00` (fails on 4.42% of real rows — see ADR-005) | quarantine | 3 |
 
+**Rounding mode:** transformation converts source values to `NUMERIC(12,2)` using `ROUND_HALF_UP`, not Python's Decimal default (banker's rounding, `ROUND_HALF_EVEN`). ADR-008 fixed the type but not the rounding mode; half-up matches how a person reconciling a fare by hand would round, avoiding a mismatch that would look like a bug to a manual reviewer.
+
 Other columns present in the source (`Source Name`, `Destination Name`,
 `Arrival Date & Time`, `Duration (hrs)`, `Stopovers`, `Aircraft Type`,
 `Booking Source`, `Days Before Departure`) are carried through to the fact
