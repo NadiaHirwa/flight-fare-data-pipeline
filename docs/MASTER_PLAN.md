@@ -249,8 +249,17 @@ check_source_file
        compute_kpi_flight_offer_count_by_airline
        compute_kpi_top_routes
   -> [fan-in]
-     post_load_quality_check        (row counts, nulls, key uniqueness, referential checks,
-                                      plus KPI-level sanity checks below)
+     post_load_quality_check        (KPI-level sanity checks below; row-count
+                                      accuracy is covered by reconciliation_check's
+                                      third equation against the fact table. Nulls,
+                                      key uniqueness, and referential integrity are
+                                      NOT separately re-checked here — the fact
+                                      table's NOT NULL and UNIQUE source_record_hash
+                                      constraints make these structurally impossible
+                                      to violate, and there are no dimension tables
+                                      to reference-check against ADR-004. A Python
+                                      re-check of a database-enforced guarantee would
+                                      be redundant, not defense-in-depth.)
   -> reconciliation_check           (source vs. valid vs. loaded, per pipeline_runs table)
 ```
 
