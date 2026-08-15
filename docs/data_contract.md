@@ -32,11 +32,11 @@ be caught by this check.
 | Airline | VARCHAR | false | operating airline | one of 24 confirmed values (see `data_profile.md`) | non-empty | quarantine | 2 |
 | Source | VARCHAR(3) | false | departure airport (IATA) | 8 Bangladesh domestic codes above | must be in domestic set | quarantine | 2 |
 | Destination | VARCHAR(3) | false | arrival airport (IATA) | 20 codes above (domestic + international) | must be in full set; `!= Source` | quarantine | 2 / 3 |
-| Departure Date & Time | TIMESTAMP | false | scheduled departure | 2025-01-03 to 2026-03-31 (observed range) | parseable timestamp | quarantine | 1 |
+| Departure Date & Time | TIMESTAMP | false | scheduled departure | 2025-01-03 to 2026-03-31 (observed range) | parseable timestamp | quarantine | 2 |
 | Class | VARCHAR | false | fare class | Business, Economy, First Class | must be one of the three | quarantine | 2 |
 | Seasonality | VARCHAR | false | season classification (already provided by source) | Regular, Winter Holidays, Hajj, Eid | must be one of the four | quarantine | 2 |
-| Base Fare (BDT) | NUMERIC(12,2) | false | pre-tax fare | >= 0 (observed min 1,600.98) | value >= 0 | quarantine | 2 |
-| Tax & Surcharge (BDT) | NUMERIC(12,2) | false | tax/surcharge amount | >= 0 (observed min 200.00) | value >= 0 | quarantine | 2 |
+| Base Fare (BDT) | NUMERIC(12,2) | false | pre-tax fare | > 0 (observed min 1,600.98) | value > 0 | quarantine | 2 |
+| Tax & Surcharge (BDT) | NUMERIC(12,2) | false | tax/surcharge amount | > 0 (observed min 200.00) | value > 0 | quarantine | 2 |
 | Total Fare (BDT) | NUMERIC(12,2) | false | final fare | — | `abs(total - (base + tax)) <= 1.00` (fails on 4.42% of real rows — see ADR-005) | quarantine | 3 |
 
 Other columns present in the source (`Source Name`, `Destination Name`,
