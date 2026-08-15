@@ -6,8 +6,21 @@ x-airflow-common: &airflow-common
     _PIP_ADDITIONAL_REQUIREMENTS: apache-airflow-providers-fab pytest
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@postgres/${AIRFLOW_DB_NAME}
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
-    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
+    # [webserver] secret_key moved to [api] in Airflow 3; the old name still
+    # works but warns on every command.
+    AIRFLOW__API__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY}
+    # Signs the JWT a running task presents to the Execution API. Unset, each
+    # process generates its own, so the scheduler's token is rejected by the
+    # api-server with "Invalid auth token" and every task fails at Pre Execute.
+    # Reuses the same secret so .env needs no new key.
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__WEBSERVER__SECRET_KEY}
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    # Airflow 3: a running task calls back to the Execution API rather than
+    # touching the metadata DB directly. The default is localhost:8080, which
+    # inside the scheduler container is nothing — tasks die at "Pre Execute"
+    # with [Errno 111] Connection refused. The api-server is a separate
+    # container, so it has to be named explicitly.
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-webserver:8080/execution/
   volumes:
     - ./dags:/opt/airflow/dags
     - ./src:/opt/airflow/src
@@ -77,6 +90,18 @@ services:
 
   airflow-init:
     <<: *airflow-common
+    environment:
+      <<: *airflow-common-env
+      # Only this service sees the database credentials. The scheduler and
+      # api-server reach MySQL and PostgreSQL through the Airflow Connections
+      # created below, per the Security section of docs/MASTER_PLAN.md — they
+      # deliberately do not get these in their environment.
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      ANALYTICS_DB_USER: ${ANALYTICS_DB_USER}
+      ANALYTICS_DB_PASSWORD: ${ANALYTICS_DB_PASSWORD}
+      ANALYTICS_DB_NAME: ${ANALYTICS_DB_NAME}
     entrypoint: /bin/bash
     command:
       - -c
@@ -89,6 +114,26 @@ services:
           --lastname Nadia \
           --role Admin \
           --email "${AIRFLOW_ADMIN_EMAIL}" || true
+        # Connections the pipeline resolves by conn_id (src/shared/connections.py).
+        # `connections add` exits 1 if the conn_id already exists, so the same
+        # `|| true` guard the user creation uses keeps a restart idempotent —
+        # this service re-runs on every `docker compose up`, not just the first.
+        # Flags verified against the CLI in this exact image (Airflow 3.3.1);
+        # conn_id is positional, everything else is --conn-*.
+        airflow connections add mysql_staging \
+          --conn-type mysql \
+          --conn-host mysql \
+          --conn-port 3306 \
+          --conn-login "${MYSQL_USER}" \
+          --conn-password "${MYSQL_PASSWORD}" \
+          --conn-schema "${MYSQL_DATABASE}" || true
+        airflow connections add postgres_analytics \
+          --conn-type postgres \
+          --conn-host postgres \
+          --conn-port 5432 \
+          --conn-login "${ANALYTICS_DB_USER}" \
+          --conn-password "${ANALYTICS_DB_PASSWORD}" \
+          --conn-schema "${ANALYTICS_DB_NAME}" || true
 
   airflow-webserver:
     <<: *airflow-common
@@ -102,6 +147,17 @@ services:
   airflow-scheduler:
     <<: *airflow-common
     command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  # Airflow 3 split DAG parsing out of the scheduler into its own component.
+  # Without it nothing ever reaches the DagModel: `airflow dags list` returns
+  # "No data found" and triggering fails with DagNotFound, even though the DAG
+  # file is present and parses cleanly.
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
     depends_on:
       airflow-init:
         condition: service_completed_successfully
