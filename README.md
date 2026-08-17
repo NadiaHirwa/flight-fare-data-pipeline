@@ -187,6 +187,7 @@ ruff.toml           Lint rule set, pinned explicitly
 | [`data_contract.md`](docs/data_contract.md) | Column-level rules — the source of truth for validation |
 | [`kpi_definitions.md`](docs/kpi_definitions.md) | Exact KPI logic |
 | [`performance_metrics.md`](docs/performance_metrics.md) | Measured timings from a real run |
+| [`architecture.md`](docs/architecture.md) | System architecture diagram and how to read it |
 | [`final_report.md`](docs/final_report.md) | The deliverable: architecture, DAG, KPIs, challenges |
 
 ## Running tests locally (outside Docker)
