@@ -6,6 +6,9 @@ lab specification asks for.
 
 ## 1. Pipeline architecture and execution flow
 
+![System architecture diagram](architecture.svg)
+*Full diagram with legend and reading notes: [`architecture.md`](architecture.md).*
+
 **Why two databases, not one.** The two layers need opposite guarantees, and one schema can't hold both. MySQL is the landing zone: it must accept everything. All 17 columns are `VARCHAR`, with no constraints. A malformed fare has to survive the load so quarantine can record what the source actually said — typing it as `DECIMAL` would make a bad row either crash the insert or get silently coerced, destroying the evidence the quarantine table exists to preserve. PostgreSQL is the serving layer: it must reject everything invalid — `NUMERIC(12,2)` never `FLOAT` (ADR-008), `NOT NULL` on contract columns, CHECK constraints, `UNIQUE` on the row hash, indexes on the KPI grouping keys. The same fare value needs to be permissive on the way in and strict on the way out; one database forces a choice, and either choice loses something — you can't quarantine what your schema already rejected.
 
 Honest caveat: the assignment mandated two databases. This reasoning justifies the split; it didn't originate it. What was a deliberate design choice on top of that requirement was refusing a third "validated" table inside MySQL — valid rows are derived by an anti-join against `quarantine` and pass straight through to transformation, so nothing is ever stored twice.
