@@ -122,7 +122,7 @@ This contract is the single source of truth for validation logic — the code im
 **Level 3 — Business rule validation** (row-level, quarantine on failure)
 - `Source != Destination`
 - `Total Fare ≈ Base Fare + Tax & Surcharge` within tolerance
-- Fare within a reasonable bound (defined after profiling — e.g., no fare below a minimum floor or above a plausible ceiling for domestic Bangladesh routes)
+- ~~Fare within a reasonable bound (defined after profiling — e.g., no fare below a minimum floor or above a plausible ceiling for domestic Bangladesh routes)~~ — **not implemented, resolved by Phase 0.** Phase 0 found fares spanning 1,600 to 558,987 BDT with no outliers, so a plausibility band would have been an invented threshold with nothing to catch. Dropping it was a decision, not an oversight: a rule whose bounds are chosen arbitrarily and which cannot fire adds a number to defend without adding a check. That leaves exactly two implemented Level 3 rules — `source_equals_destination` and `total_fare_reconciliation` — which is what `rules.py` contains. The fare-sign checks sit at Level 2, per the contract.
 
 **Quarantine design.** Invalid rows are never silently dropped. Each rejected row is written to a `staging.quarantine` table with:
 
@@ -221,16 +221,26 @@ If these equations don't hold on any run, that's a detectable data-loss signal �
 
 ```
 dags/
-    flight_price_pipeline.py        <- thin: task definitions and dependencies only
+    flight_price_pipeline_dag.py    <- thin: task definitions and dependencies only
 
 src/
+    shared/                         <- leaf package: DB engines, normalization +
+                                       record hash, pipeline_runs audit writers
     ingestion/                      <- CSV -> MySQL staging
     validation/                     <- Level 1/2/3 rules, quarantine writer
-    transformation/                 <- Total Fare calc, type normalization
-    loading/                        <- MySQL valid rows -> Postgres fact table
-    kpi/                            <- one module per KPI's SQL/logic
-    quality/                        <- post-load checks, reconciliation
+    transformation/                 <- type conversion + load into the fact table
+    kpi/                            <- one runner per KPI's SQL file
+    quality/                        <- quality gate, post-load checks, reconciliation
 ```
+
+As-built note: `loading/` was planned as a separate package but was folded
+into `transformation/` — the type conversion and the insert into
+`flight_fare_quotes` share a single database transaction, so they cannot be
+split across modules without giving up the rollback guarantee (see
+`transform_and_load_fact` in `final_report.md` §2). `shared/` was added for the
+inverse reason: engines, normalization and the audit-row writers are needed by
+three stages each, and leaving them in whichever stage happened to need one
+first made later stages import earlier ones just to borrow a helper.
 
 **Task boundaries** (meaningful, independently retryable units — not one task per tiny function):
 
@@ -402,6 +412,9 @@ load throughput
 ```
 README.md                       - setup and run instructions
 docs/
+    MASTER_PLAN.md               - this document: architecture and full reasoning
+    architecture.md              - system diagram with reading notes
+    architecture.svg             - the diagram itself
     data_profile.md              - Phase 0 findings
     data_contract.md             - column-level contract
     engineering_decisions.md     - all ADRs in one file, short format each
@@ -450,6 +463,19 @@ All three items originally tracked here have been resolved by Phase 0 profiling:
 2. ~~The 5% rejection threshold is provisional~~ — **resolved.** Finalized at 6%, based on the real 4.42% natural noise rate found in the data. See ADR-005.
 3. ~~`fact_flight_prices` is a working name~~ — **resolved.** Renamed to `flight_fare_quotes`, since Phase 0 confirmed the grain is a fare quote, not a booking. See ADR-011.
 
-## Immediate Next Step
+## Status — plan complete
 
-Phase 0 dataset profiling. Nothing downstream (schema DDL, validation code, KPI SQL, DAG structure) is finalized until the CSV has actually been inspected against the questions above — particularly the date-column question that determines whether Seasonal Fare Variation can be built as specified.
+Phase 0 profiling is done, every decision above is final, and the pipeline has
+run end to end against the real 57,000-row dataset with all 12 tasks
+succeeding. The definition-of-done checklist at the top of this document is
+fully ticked.
+
+~~Immediate next step: Phase 0 dataset profiling.~~ — **complete.** Findings in
+[`data_profile.md`](data_profile.md); the date-column question that gated
+Seasonal Fare Variation was resolved in that pass (the source ships a
+`Seasonality` column, so no peak-season date boundaries had to be invented).
+
+This document is now a record of how the design was arrived at, not a plan of
+work outstanding. For what was actually built and measured, see
+[`final_report.md`](final_report.md) and
+[`performance_metrics.md`](performance_metrics.md).
