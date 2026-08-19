@@ -27,6 +27,14 @@ be caught by this check.
 
 ## Columns
 
+The `type` column below describes the **PostgreSQL fact table**
+(`analytics.flight_fare_quotes`) — the typed serving layer these rules gate
+entry to. It does *not* describe MySQL staging: `raw_flights` holds all 17
+source columns as `VARCHAR` on purpose, so a malformed value survives the load
+and can be quarantined with its original text intact (ADR-008, "Why staging is
+exempt"). Conversion to the types below happens in `transform_and_load_fact`,
+after these rules have passed.
+
 | column | type | nullable | business meaning | valid domain/range | validation rule | action on violation | level |
 |---|---|---|---|---|---|---|---|
 | Airline | VARCHAR | false | operating airline | one of 24 confirmed values (see `data_profile.md`) | non-empty | quarantine | 2 |
