@@ -10,16 +10,17 @@ condensed reference version for the final report.
 
 **Context:** The source is a one-time Kaggle CSV, not daily incremental data.
 **Options:** (a) `data_interval`-based partitioning, the Airflow default assumption; (b) full truncate-and-reload per run.
-**Decision:** Full truncate-and-reload — **preferred, conditional on Phase 0 confirming dataset size/load duration.**
+**Phase 0 finding:** 57,000 rows / 13.49 MB. A measured full run reloads the analytics layer in 14.34 s and completes the whole pipeline in 32.43 s (`docs/performance_metrics.md`), so a full reload has no meaningful performance cost at this size.
+**Decision:** Full truncate-and-reload — **final, no longer conditional.** Confirmed by the Phase 0 size finding above.
 **Reason:** There's no "yesterday's slice" to reprocess; applying date-partitioning to a static file would misuse the pattern rather than correctly implement it.
-**Consequences:** Simple to reason about; would need revisiting only if profiling reveals an unexpectedly large dataset where a full reload has a real performance cost.
+**Consequences:** Simple to reason about, and every task is retry-safe by construction as a result. The PostgreSQL truncate and insert share one transaction, so a mid-load failure rolls back rather than leaving the serving layer half-written. This would only need revisiting if the pipeline were pointed at a substantially larger source, or at genuinely incremental data — neither of which is this dataset.
 
 ## ADR-002 — MySQL staging vs. PostgreSQL analytics separation
 
 **Context:** The assignment specifies both a MySQL staging layer and a PostgreSQL analytics layer.
 **Decision:** MySQL holds `raw_flights` and `quarantine` only (raw landing zone). PostgreSQL holds the fact table and KPI tables (serving layer), plus Airflow's own metadata in a separate database on the same instance.
 **Reason:** Mirrors real heterogeneous stacks and the staging/marts separation studied in DEM06's dbt lessons, without persisting a redundant "validated" copy inside MySQL.
-**Consequences:** Two connection types to secure (Decision covered in ADR — see Security section of MASTER_PLAN.md); clean separation of raw vs. served data.
+**Consequences:** Two connection types to secure — both handled via Airflow Connections with dedicated least-privilege roles, as set out in the Security section of `docs/MASTER_PLAN.md`; clean separation of raw vs. served data.
 
 ## ADR-003 — Three-level validation with quarantine
 
@@ -31,9 +32,10 @@ condensed reference version for the final report.
 ## ADR-004 — Fact table + KPI tables, star schema rejected
 
 **Context:** DEM04 covered dimensional modeling; this dataset is a single static extract.
-**Decision:** One fact table plus four flat KPI tables. No `dim_airline`/`dim_route`/`dim_date`.
+**Phase 0 finding:** no slowly-changing attributes anywhere. `Airline` is 24 clean fixed values, `Class` 3, `Seasonality` 4, `Stopovers` 3, `Booking Source` 3, `Aircraft Type` 5 — all enum-like, none carrying attributes that would ever need their own row history. There is also no update cadence: the source is one static file.
+**Decision:** One fact table plus four flat KPI tables. No `dim_airline`/`dim_route`/`dim_date`. **Final** — the Phase 0 finding above removed the only condition under which a star schema would have been warranted.
 **Reason:** The current dataset and analytical scope don't justify the joins, surrogate keys, and maintenance overhead a star schema would add. Demonstrating restraint here reflects DEM04 knowledge better than forcing a pattern that doesn't fit.
-**Consequences:** Revisit only if profiling reveals a genuine need (e.g. slowly-changing airline metadata).
+**Consequences:** KPI queries read one table with no joins. This would only be reopened if a future source introduced genuinely slowly-changing dimension attributes — profiling confirmed this one does not.
 
 ## ADR-005 — Data-quality gate threshold
 
@@ -60,9 +62,10 @@ condensed reference version for the final report.
 ## ADR-008 — Money stored as NUMERIC, never FLOAT
 
 **Context:** Fare values are currency.
-**Decision:** All fare columns are `NUMERIC(12,2)` in both MySQL and PostgreSQL.
-**Reason:** Floating-point types introduce rounding errors unacceptable for monetary values and for the `Total Fare` reconciliation check specifically.
-**Consequences:** None significant — this is strictly the correct choice for money.
+**Decision:** Every money column in the PostgreSQL analytics layer is `NUMERIC(12,2)` — never `FLOAT` or `DOUBLE PRECISION` — and Python holds fares as `Decimal`, never `float`, throughout validation and transformation. MySQL staging is deliberately *not* covered by this: all 17 source columns there are `VARCHAR`, so typing happens exactly once, in the transform, on the way into the serving layer.
+**Reason:** Floating-point types introduce rounding errors unacceptable for monetary values, and specifically for the `Total Fare` reconciliation check — with binary floats the rounding error would sit inside the very comparison meant to detect arithmetic that doesn't add up, making the project's headline data-quality finding untrustworthy.
+**Why staging is exempt:** a raw landing zone has to accept whatever the file contains. Typing `base_fare_bdt` as `DECIMAL` in `raw_flights` would make a malformed value either fail the bulk load or be silently coerced — and `quarantine.original_record` exists precisely to preserve what the source actually said. You cannot quarantine a value your schema already rejected. `VARCHAR` is lossless for this purpose: it preserves the source digits exactly, including the full float precision the CSV carries (e.g. `21131.22502141266`). See ADR-003 and the header comment in `include/sql/staging/create_staging_table.sql`.
+**Consequences:** None significant for the serving layer — this is strictly the correct choice for money. The one cost is that the staging/serving split has to be stated explicitly, as above, or the rule reads as though it were violated by the staging DDL.
 
 ## ADR-009 — Primarily ETL, with an ELT-style KPI layer
 
