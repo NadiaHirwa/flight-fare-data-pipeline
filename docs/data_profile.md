@@ -116,7 +116,7 @@ confirmed as final, not provisional. No reason to reconsider this decision.
 
 - [x] ADR-001 confirmed final: truncate-and-reload (57K rows is small; no reconsideration needed)
 - [x] Seasonal Fare Variation KPI: buildable directly via `GROUP BY Seasonality` — no date-range derivation needed
-- [ ] **ADR-005 needs a real decision, not just confirmation** — natural noise rate is 4.42%, right at the edge of the provisional 5% gate. See discussion below.
-- [ ] **Fact table and KPI naming should change** — grain is "flight fare quote," not "booking." `fact_flight_prices` and "Booking Count by Airline" should be renamed to reflect this honestly.
+- [x] ADR-005 decided: threshold set to 6%, above the 4.42% natural noise floor found here — full reasoning in `engineering_decisions.md`
+- [x] Fact table and KPI renamed: `flight_fare_quotes` (not `fact_flight_prices`) and "Flight Offer Count by Airline" (not "Booking Count") — ADR-011, since no booking entity exists in the source data
 - [x] ADR-010 reference domain: the 20 IATA codes listed above, citable against the official IATA registry
-- [x] `docs/data_contract.md` — ready to finalize using the findings above
+- [x] `docs/data_contract.md` — finalized using the findings above
